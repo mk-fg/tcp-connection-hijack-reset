@@ -8,16 +8,22 @@ import os, sys
 from scapy.all import *
 
 
-class TCP_Breaker(Automaton):
+class TCPBreaker(Automaton):
 
-	ss_remote = None
+	ss_filter_port = ss_remote = None
 	ss_intercept = list()
+
+	def __init__(self, port, **atmt_kwz):
+		self.ss_filter_port = port
+		super(TCPBreaker, self).__init__(**atmt_kwz)
+
 
 	def pkt_filter(self, pkt):
 		if IP not in pkt or TCP not in pkt: raise KeyError
-		elif pkt[TCP].dport == 5190: return pkt[IP].dst
-		elif pkt[TCP].sport == 5190: return pkt[IP].src
+		elif pkt[TCP].dport == self.ss_filter_port: return pkt[IP].dst
+		elif pkt[TCP].sport == self.ss_filter_port: return pkt[IP].src
 		else: raise KeyError
+
 
 	@ATMT.state(initial=1)
 	def st_seek(self):
@@ -62,28 +68,36 @@ class TCP_Breaker(Automaton):
 				ordered('seq', pkt_tcp.seq, 'ack', pkt_tcp.ack),
 				dict(flags=b'FA', window=pkt_tcp.window) ))))
 		rst[TCP].ack += len(pkt_tcp.payload)
+		log.debug('RST: {}'.format(rst.summary()))
 		sendp(rst)
 		self.stop()
 
 
 def main(argv=None):
 	import argparse
-	parser = argparse.ArgumentParser(description='Connection breaking tool.')
-	# parser.add_argument('-f', '--bpf', metavar='bpf_filter_string',
-	# 	help='BPF (Berkley Packet Filter) format string to'
-	# 			' passively snatch packets on relevant connection with.'
-	# 		' Prepended with "tcp and" for convenience,'
-	# 			' so that "port 5190" argument will result in "tcp and port 5190" filter.'
-	# 		' If not specified, auto-generated from provided ips'
-	# 			' and/or port numbers (e.g. "port 5190" from "-p 5190").')
+	parser = argparse.ArgumentParser(
+		description='TCP connection breaking tool.'
+			' Uses Linux tcp_diag interface or captured traffic to get connection sequence'
+				' number and inject RST packet into it, killing it regardless of how active it is'
+				' and without resorting to bruteforce-guessing of seq numbers.')
+	parser.add_argument('port', type=int, help='TCP port of connection to close.')
+	parser.add_argument('-f', '--bpf', metavar='bpf_filter_string',
+		help='BPF (Berkley Packet Filter) format string to'
+				' passively snatch packets on relevant connection with.'
+			' Prepended with "tcp and" for convenience,'
+				' so that "port 5190" argument will result in "tcp and port 5190" filter.'
+			' If not specified, auto-generated from provided IPs'
+				' and/or port numbers (e.g. "port 5190" from "5190" as port argument).')
 	parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
-	argz = parser.parse_args(sys.argv[1:] if argv is None else argv)
+	optz = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
 	import logging
-	logging.basicConfig(level=logging.DEBUG if argz.debug else logging.INFO)
+	logging.basicConfig(level=logging.DEBUG if optz.debug else logging.INFO)
+	global log
 	log = logging.getLogger()
 
-	TCP_Breaker(store=False, filter='tcp and port 5190').run()
+	if not optz.bpf: optz.bpf = 'port {}'.format(optz.port)
+	TCPBreaker(port=optz.port, store=False, filter='tcp and {}'.format(optz.bpf)).run()
 
 
 if __name__ == '__main__': sys.exit(main())
