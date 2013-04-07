@@ -2,7 +2,7 @@
 from __future__ import unicode_literals, print_function
 
 import itertools as it, operator as op, functools as ft
-import os, sys
+import os, sys, signal
 
 from scapy.all import *
 
@@ -94,6 +94,7 @@ class TCPBreaker(Automaton):
 		fin[TCP].ack += len(pkt_tcp.payload)
 		log.debug('Sending FIN: {!r}'.format(fin))
 		sendp(fin)
+		os.kill(os.getpid(), signal.SIGINT)
 		self.stop()
 
 
