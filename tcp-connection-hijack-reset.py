@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 from __future__ import unicode_literals, print_function
 
-from subprocess import Popen, PIPE, STDOUT
 import itertools as it, operator as op, functools as ft
 import os, sys
 
@@ -68,13 +67,12 @@ class TCPBreaker(Automaton):
 	def interception_done(self):
 		if self.ss_remote and self.ss_intercept:
 			log.debug('Captured seq, proceeding to termination')
-			raise self.st_rst_send()
-		else:
-			remote, sport, dport = self.get_remote_by_port()
-			log.debug('Provoking remote ({}) to send correcting ACK'.format(remote))
-			# Contrary to what digitage.co.uk/digitage/software/cutter says, it doesn't work ;(
-			pkt = IP(dst=remote)/TCP(sport=sport, dport=dport, seq=0, flags=b'PA')#/b'XXX'
-			send(pkt)
+			raise self.st_fin_send()
+		# else:
+		# 	remote, sport, dport = self.get_remote_by_port()
+		# 	log.debug('Provoking remote ({}) to send correcting ACK'.format(remote))
+		# 	# Contrary to what digitage.co.uk/digitage/software/cutter says, it doesn't work ;(
+		# 	send(IP(dst=remote)/TCP(sport=sport, dport=dport, seq=0, flags=b'PA'))
 
 	@ATMT.state()
 	def st_collect(self, pkt):
@@ -83,19 +81,19 @@ class TCPBreaker(Automaton):
 		raise self.st_seek()
 
 	@ATMT.state()
-	def st_rst_send(self):
+	def st_fin_send(self):
 		pkt_eth, pkt_ip, pkt_tcp = op.itemgetter(Ether, IP, TCP)(self.ss_intercept[-1])
 		ordered = lambda k1,v1,k2,v2,pkt_dir=(pkt_ip.dst == self.ss_remote):\
 			dict(it.izip((k1,k2), (v1,v2) if pkt_dir else (v2,v1)))
-		rst = Ether(**ordered('dst', pkt_eth.dst, 'src', pkt_eth.src))\
+		fin = Ether(**ordered('dst', pkt_eth.dst, 'src', pkt_eth.src))\
 			/ IP(**ordered('src', pkt_ip.src, 'dst', pkt_ip.dst))\
 			/ TCP(**dict(it.chain.from_iterable(p.viewitems() for p in (
 				ordered('sport', pkt_tcp.sport, 'dport', pkt_tcp.dport),
 				ordered('seq', pkt_tcp.seq, 'ack', pkt_tcp.ack),
 				dict(flags=b'FA', window=pkt_tcp.window) ))))
-		rst[TCP].ack += len(pkt_tcp.payload)
-		log.debug('Sending RST: {!r}'.format(rst))
-		sendp(rst)
+		fin[TCP].ack += len(pkt_tcp.payload)
+		log.debug('Sending FIN: {!r}'.format(fin))
+		sendp(fin)
 		self.stop()
 
 
@@ -104,7 +102,7 @@ def main(argv=None):
 	parser = argparse.ArgumentParser(
 		description='TCP connection breaking tool.'
 			' Uses Linux tcp_diag interface or captured traffic to get connection sequence'
-				' number and inject RST packet into it, killing it regardless of how active it is'
+				' number and inject FIN packet into it, killing it regardless of how active it is'
 				' and without resorting to bruteforce-guessing of seq numbers.')
 	parser.add_argument('port', type=int,
 		help='TCP port of local (unless --remote-port is specified) connection to close.')
