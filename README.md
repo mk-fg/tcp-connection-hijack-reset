@@ -2,11 +2,11 @@ tcp-connection-hijack-reset
 --------------------
 
 Simple [scapy](http://www.secdev.org/projects/scapy/)-based tool to hijack and
-reset existing TCP connections, established from other pid's.
+reset existing TCP connections, established from other pids.
 
 Purpose is not some malicious DoS attacks but rather kicking hung state-machines
 in otherwise nice software, while making the whole thing look like a random net
-hiccup, which most things can easily handle.
+hiccup, which most apps are designed to handle.
 
 Tool doesn't require any firewall configuration changes, but it flips network
 interfaces into promiscuous mode for the time it runs.
@@ -23,7 +23,7 @@ Imagine two hosts happily chatting over netcat:
 	host2% ncat -v host1 1234
 	Ncat: Connected to host1:1234.
 
-Yet root on host2 doesn't want any of this chatter...
+Yet root on host2 doesn't want them to chat...
 
 	host2# ./tcp-connection-hijack-reset.py --debug --remote-port 1234
 	DEBUG:root:Waiting for noise on the session
@@ -80,13 +80,13 @@ Possible enhancements
 Similar tools
 --------------------
 
-- [dsniff](http://www.monkey.org/~dugsong/dsniff/) has "tcpkill" binary that
+- [dsniff](http://www.monkey.org/~dugsong/dsniff/) - has "tcpkill" binary that
 	does very similar thing.
 
-- [tcpkill](https://github.com/chartbeat/tcpkill) standalone tcpkill tool from
+- [tcpkill](https://github.com/chartbeat/tcpkill) - standalone tcpkill tool from
 	dsniff.
 
-- [cutter](http://www.digitage.co.uk/digitage/software/cutter) aims to solve
+- [cutter](http://www.digitage.co.uk/digitage/software/cutter) - aims to solve
 	similar problem, but on a router box (seem to work with conntrack tables
 	only), and with some strange methods (generating noise on connection to get
 	seq, which doesn't seem to work at all).
