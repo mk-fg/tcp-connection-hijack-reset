@@ -76,6 +76,11 @@ Possible enhancements
 	Wasn't able to find any, but didn't look hard enough to various netlink
 	options available, so maybe there is a way already.
 
+- More convenient CLI and operation - allow to specify pid to hijack connections
+	from, stick around to check if fin was sent from remote, configurable
+	hijack-delay, option to set a timeout for operation, hide scapy's "packet
+	sent" messages.
+
 
 Similar tools
 --------------------
