@@ -78,8 +78,7 @@ Possible enhancements
 
 - More convenient CLI and operation - allow to specify pid to hijack connections
 	from, stick around to check if fin was sent from remote, configurable
-	hijack-delay, option to set a timeout for operation, hide scapy's "packet
-	sent" messages.
+	hijack-delay, option to set a timeout for operation.
 
 
 Similar tools

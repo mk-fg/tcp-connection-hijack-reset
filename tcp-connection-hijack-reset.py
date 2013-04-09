@@ -20,7 +20,6 @@ class TCPBreaker(Automaton):
 	def pkt_filter(self, pkt):
 		'Filter packets by additional (to bpf) criterias, passed on init.'
 		if IP not in pkt or TCP not in pkt: raise KeyError
-		if pkt.seq == 0: raise KeyError # ack-bait packet
 		for port, res_dport, res_sport in [
 				(self.ss_filter_port_local, 'src', 'dst'),
 				(self.ss_filter_port_remote, 'dst', 'src') ]:
@@ -68,11 +67,6 @@ class TCPBreaker(Automaton):
 		if self.ss_remote and self.ss_intercept:
 			log.debug('Captured seq, proceeding to termination')
 			raise self.st_fin_send()
-		# else:
-		# 	remote, sport, dport = self.get_remote_by_port()
-		# 	log.debug('Provoking remote ({}) to send correcting ACK'.format(remote))
-		# 	# Contrary to what digitage.co.uk/digitage/software/cutter says, it doesn't work ;(
-		# 	send(IP(dst=remote)/TCP(sport=sport, dport=dport, seq=0, flags=b'PA'))
 
 	@ATMT.state()
 	def st_collect(self, pkt):
@@ -123,6 +117,11 @@ def main(argv=None):
 	logging.basicConfig(level=logging.DEBUG if optz.debug else logging.INFO)
 	global log
 	log = logging.getLogger()
+
+	# It should be traffic to/from same machine - no promisc-mode necessary
+	conf.promisc = conf.sniff_promisc = False
+	# Disables "Sent 1 packets." line
+	conf.verb = False
 
 	if not optz.bpf: optz.bpf = 'port {}'.format(optz.port)
 	TCPBreaker(
