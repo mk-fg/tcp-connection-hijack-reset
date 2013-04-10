@@ -13,8 +13,31 @@ hiccup, which most apps are designed to handle.
 Usage
 --------------------
 
-To be updated.
+- "conn_cutter" ipset: `ipset create conn_cutter hash:ip,port`
 
+- "OUTPUT" chain:
+
+	```
+	-A OUTPUT -j conn_cutter
+	-A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+	...
+	```
+
+- "conn_cutter" chain (some lines wrapped):
+
+	```
+	-A conn_cutter ! -p tcp -j RETURN
+	-A conn_cutter -m set ! --match-set conn_cutter src,src -j RETURN
+	-A conn_cutter -p tcp -m recent --set --name conn_cutter --rsource
+	-A conn_cutter -p tcp -m recent ! --rcheck --seconds 20\
+		--hitcount 2 --name conn_cutter --rsource -j NFLOG
+	-A conn_cutter -p tcp -m recent ! --rcheck --seconds 20\
+		--hitcount 2 --name conn_cutter --rsource -j REJECT --reject-with tcp-reset
+	```
+
+- run: `tcp-connection-hijack-reset.py conn_cutter --pid 1234 --debug`
+
+- result: both endpoints reliably get single RST packet and closed connection.
 
 
 Similar tools
