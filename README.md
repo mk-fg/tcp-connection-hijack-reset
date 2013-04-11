@@ -9,6 +9,9 @@ Purpose is not some malicious DoS attacks but rather kicking hung state-machines
 in otherwise nice software, while making the whole thing look like a random net
 hiccup, which most apps are designed to handle.
 
+If NFLOG is used (to get packets that should not pass netfilter, for instance),
+requires [scapy-nflog-capture](https://github.com/mk-fg/scapy-nflog-capture).
+
 
 Usage
 --------------------
