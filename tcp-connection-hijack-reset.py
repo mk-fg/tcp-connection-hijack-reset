@@ -8,7 +8,7 @@ from subprocess import Popen, PIPE
 from os.path import join
 import os, sys, signal, re
 
-from scapy_nflog import NFLOGListenSocket
+from scapy_nflog import install_nflog_listener
 
 
 class ConnMultipleMatches(Exception): pass
@@ -66,7 +66,7 @@ def ipset_update(cmd, name, ip, port):
 	if name is None: return
 	assert cmd in ['add', 'del'], cmd
 	log.debug('Updating ipset {!r} ({} {}:{})'.format(name, cmd, ip, port))
-	if Popen(['ipset', cmd, name, '{},{}'.format(ip, port)]).wait():
+	if Popen(['ipset', '-!', cmd, name, '{},{}'.format(ip, port)]).wait():
 		raise RuntimeError('Failed running ipset command, see error output above.')
 
 
@@ -167,7 +167,7 @@ def main(argv=None):
 	# Disables "Sent 1 packets." line
 	conf.verb = False
 	# Install NFLOG listener
-	conf.L2listen = NFLOGListenSocket
+	install_nflog_listener()
 
 	if optz.port:
 		local, remote = get_endpoints(
