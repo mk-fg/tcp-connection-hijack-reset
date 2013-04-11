@@ -8,8 +8,6 @@ from subprocess import Popen, PIPE
 from os.path import join
 import os, sys, signal, re
 
-from scapy_nflog import install_nflog_listener
-
 
 class ConnMultipleMatches(Exception): pass
 class ConnNotFound(Exception): pass
@@ -76,11 +74,14 @@ class TCPBreaker(Automaton):
 	ss_filter_port_local = ss_filter_port_remote = None
 	ss_remote, ss_intercept = None, None
 
-	def __init__(self, port_local, port_remote, **atmt_kwz):
+	def __init__(self, port_local, port_remote, timeout=False, **atmt_kwz):
 		self.ss_filter_port_local, self.ss_filter_port_remote = port_local, port_remote
+		self.ss_timeout = timeout
 		atmt_kwz.setdefault('store', False)
 		atmt_kwz.setdefault( 'filter',
-			'tcp and src port {} and dst port {}'.format(port_local, port_remote) )
+			( 'tcp and ((src port {sport} and dst port {dport})'
+				' or (dst port {sport} and src port {dport}))' )\
+			.format(sport=port_local, dport=port_remote) )
 		super(TCPBreaker, self).__init__(**atmt_kwz)
 
 	def pkt_filter(self, pkt):
@@ -95,7 +96,7 @@ class TCPBreaker(Automaton):
 
 	@ATMT.receive_condition(st_seek)
 	def check_packet(self, pkt):
-		log.debug('Session check, packet: {!r}'.format(pkt))
+		log.debug('Session check, packet: {}'.format(pkt.summary()))
 		try: remote = self.pkt_filter(pkt)
 		except KeyError: return
 		raise self.st_collect(pkt).action_parameters(remote)
@@ -105,19 +106,29 @@ class TCPBreaker(Automaton):
 			log.debug('Found session (remote: {})'.format(remote))
 			self.ss_remote = remote
 
+	@ATMT.timeout(st_seek, 1) # yep, hard-coded 1s timeout
+	def interception_done(self):
+		if self.ss_remote and self.ss_intercept:
+			log.debug('Captured seq, proceeding to termination')
+			raise self.st_rst_send()
+
 	@ATMT.state()
 	def st_collect(self, pkt):
-		log.debug('Collected: {}'.format(pkt.summary()))
-		self.ss_intercept = pkt
-		raise self.st_rst_send()
+		log.debug('Collected: {!r}'.format(pkt))
+		self.ss_intercept = pkt # only last one matters
+		raise (self.st_rst_send if not self.ss_timeout else self.st_seek)()
 
 	@ATMT.state()
 	def st_rst_send(self):
 		pkt_ip, pkt_tcp = op.itemgetter(IP, TCP)(self.ss_intercept)
-		rst = IP(src=pkt_ip.src, dst=pkt_ip.dst)\
-			/ TCP( flags='R', window=pkt_tcp.window,
-				sport=pkt_tcp.sport, dport=pkt_tcp.dport,
-				seq=pkt_tcp.seq, ack=pkt_tcp.ack )
+		ordered = lambda k1,v1,k2,v2,pkt_dir=(pkt_ip.dst == self.ss_remote):\
+			dict(it.izip((k1,k2), (v1,v2) if pkt_dir else (v2,v1)))
+		rst = IP(**ordered('src', pkt_ip.src, 'dst', pkt_ip.dst))\
+			/ TCP(**dict(it.chain.from_iterable(p.viewitems() for p in (
+				ordered('sport', pkt_tcp.sport, 'dport', pkt_tcp.dport),
+				ordered('seq', pkt_tcp.seq, 'ack', pkt_tcp.ack),
+				dict(flags=b'R', window=pkt_tcp.window) ))))
+		rst[TCP].ack = 0
 		log.debug('Sending RST: {!r}'.format(rst))
 		send(rst)
 
@@ -137,11 +148,12 @@ def main(argv=None):
 			' Also uses captured traffic to get connection sequence number and send'
 				' RST packet to remote endpoint, removing ip:port from ipset upon success.')
 
-	parser.add_argument('ipset_name',
+	parser.add_argument('ipset_name', nargs='?',
 		help='Name of the ipset to temporarily insert local ip:port to.'
-			' Should be used in some iptables filter rule,'
-				' rejecting outgoing packets from it with tcp-reset packet.'
-			' If not specified, no ipset updates will be performed.')
+			' Should be used in some iptables filter rule, rejecting outgoing'
+				' packets matching it with tcp-reset packet (see README for examples).'
+			' If not specified, no ipset updates will be performed and raw-socket'
+				' capture interface will be used (as packet will presumably make it through netfilter).')
 
 	parser.add_argument('--pid', type=int,
 		help='Process ID to terminate connection of.')
@@ -153,6 +165,10 @@ def main(argv=None):
 	parser.add_argument('-d', '--remote-port', action='store_true',
 		help='Treat port argument as remote, not local one.')
 
+	parser.add_argument('-c', '--capture', metavar='driver',
+		help='Either "raw" or "nflog". Default is "nflog" if ipset name is'
+			' specified as an argument (since packet should not pass through'
+			' netfilter in this case), otherwise "raw".')
 	parser.add_argument('--debug', action='store_true', help='Verbose operation mode.')
 	optz = parser.parse_args(sys.argv[1:] if argv is None else argv)
 
@@ -161,13 +177,21 @@ def main(argv=None):
 	global log
 	log = logging.getLogger()
 
-	## Configure scapy
+	if not optz.capture:
+		optz.capture = 'nflog' if optz.ipset_name else 'raw'
+		if optz.capture == 'nflog': log.debug('Using nflog packet capture interface')
+	elif optz.capture not in ['nflog', 'raw']:
+		parser.error('Only "nflog" or "raw" values are'
+			' supported with --capture option, not {!r}'.format(optz.capture))
+
 	# It should be traffic to/from same machine - no promisc-mode necessary
 	conf.promisc = conf.sniff_promisc = False
 	# Disables "Sent 1 packets." line
 	conf.verb = False
-	# Install NFLOG listener
-	install_nflog_listener()
+
+	if optz.capture == 'nflog':
+		from scapy_nflog import install_nflog_listener
+		install_nflog_listener()
 
 	if optz.port:
 		local, remote = get_endpoints(
@@ -178,7 +202,7 @@ def main(argv=None):
 	log.debug('Found connection: {0[0]}:{0[1]} -> {1[0]}:{1[1]}'.format(local, remote))
 
 	ipset_update('add', optz.ipset_name, *local)
-	try: TCPBreaker(port_local=local[1], port_remote=remote[1]).run()
+	try: TCPBreaker(port_local=local[1], port_remote=remote[1], timeout=True).run()
 	finally: ipset_update('del', optz.ipset_name, *local)
 
 
