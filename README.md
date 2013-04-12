@@ -16,17 +16,9 @@ requires [scapy-nflog-capture](https://github.com/mk-fg/scapy-nflog-capture).
 Usage
 --------------------
 
-- "conn_cutter" ipset: `ipset create conn_cutter hash:ip,port`
+- Create "conn_cutter" ipset: `ipset create conn_cutter hash:ip,port`
 
-- "OUTPUT" chain:
-
-	```
-	-A OUTPUT -j conn_cutter
-	-A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
-	...
-	```
-
-- "conn_cutter" chain (some lines wrapped):
+- Create "conn_cutter" chain (some lines wrapped):
 
 	```
 	-A conn_cutter ! -p tcp -j RETURN
@@ -38,9 +30,35 @@ Usage
 		--hitcount 2 --name conn_cutter --rsource -j REJECT --reject-with tcp-reset
 	```
 
-- run: `tcp-connection-hijack-reset.py conn_cutter --pid 1234 --debug`
+	Note that due to one global "recent" netfilter tag used above, only one
+	connection can be cut in 20 seconds (others will pass through this chain
+	unharmed).
 
-- result: both endpoints reliably get single RST packet and closed connection.
+	This is done in case of rare pids which may bind() outgoing socket to a
+	constant port, so that packets of the reconnection attempt from the same port
+	won't get matched and pass.
+
+- Update "OUTPUT" chain:
+
+	```
+	-I OUTPUT -j conn_cutter
+	```
+
+	That should be strictly *before* rules like `--state RELATED,ESTABLISHED -j
+	ACCEPT`.
+
+- Run: `tcp-connection-hijack-reset.py conn_cutter --pid 1234 --debug`
+
+	Will pick single TCP connection of a specified pid (or raise error if there's
+	more than one) and cut it, with a lots of noise about what it's doing (due to
+	"--debug").
+
+- Result: both endpoints should reliably get single RST packet and connection
+	closed promptly.
+
+See [this
+post](http://blog.fraggod.net/2013/04/08/tcp-hijacking-for-the-greater-good.html)
+on more details about what it all means and why it's there.
 
 
 Similar tools
